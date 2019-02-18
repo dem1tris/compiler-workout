@@ -35,20 +35,39 @@ let update x v s = fun y -> if x = y then v else s y
 (* An example of a non-trivial state: *)                                                   
 let s = update "x" 1 @@ update "y" 2 @@ update "z" 3 @@ update "t" 4 empty
 
-(* Some testing; comment this definition out when submitting the solution. *)
+(* Some testing; comment this definition out when submitting the solution.
 let _ =
   List.iter
     (fun x ->
        try  Printf.printf "%s=%d\n" x @@ s x
        with Failure s -> Printf.printf "%s\n" s
     ) ["x"; "a"; "y"; "z"; "t"; "b"]
+*)
+
+let to_int b = if b then 1 else 0
 
 (* Expression evaluator
 
      val eval : state -> expr -> int
- 
-   Takes a state and an expression, and returns the value of the expression in 
+
+   Takes a state and an expression, and returns the value of the expression in
    the given state.
 *)
-let eval = failwith "Not implemented yet"
-                    
+
+let rec eval s e = match e with
+    | Const c -> c
+    | Var v -> s v
+    | Binop ("+",  a, b) -> eval s a + eval s b
+    | Binop ("-",  a, b) -> eval s a - eval s b
+    | Binop ("*",  a, b) -> eval s a * eval s b
+    | Binop ("/",  a, b) -> eval s a / eval s b
+    | Binop ("%",  a, b) -> eval s a mod eval s b
+    | Binop ("<",  a, b) -> to_int(eval s a < eval s b)
+    | Binop ("<=", a, b) -> to_int(eval s a <= eval s b)
+    | Binop (">",  a, b) -> to_int(eval s a > eval s b)
+    | Binop (">=", a, b) -> to_int(eval s a >= eval s b)
+    | Binop ("==", a, b) -> to_int(eval s a == eval s b)
+    | Binop ("!=", a, b) -> to_int(eval s a != eval s b)
+    | Binop ("!!", a, b) -> to_int(eval s a != 0 || eval s b != 0)
+    | Binop ("&&", a, b) -> to_int(eval s a != 0 && eval s b != 0)
+    | _ -> failwith @@ Printf.sprintf "Syntax error"
