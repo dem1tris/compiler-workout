@@ -34,6 +34,9 @@ module Expr =
     *)
     let update x v s = fun y -> if x = y then v else s y
 
+    let to_int b = if b then 1 else 0
+
+
     (* Expression evaluator
 
           val eval : state -> t -> int
@@ -41,7 +44,23 @@ module Expr =
        Takes a state and an expression, and returns the value of the expression in 
        the given state.
     *)
-    let eval _ = failwith "Not implemented yet"
+    let rec eval s e = match e with
+        | Const c -> c
+        | Var v -> s v
+        | Binop ("+",  a, b) -> eval s a + eval s b
+        | Binop ("-",  a, b) -> eval s a - eval s b
+        | Binop ("*",  a, b) -> eval s a * eval s b
+        | Binop ("/",  a, b) -> eval s a / eval s b
+        | Binop ("%",  a, b) -> eval s a mod eval s b
+        | Binop ("<",  a, b) -> to_int (eval s a < eval s b)
+        | Binop ("<=", a, b) -> to_int (eval s a <= eval s b)
+        | Binop (">",  a, b) -> to_int (eval s a > eval s b)
+        | Binop (">=", a, b) -> to_int (eval s a >= eval s b)
+        | Binop ("==", a, b) -> to_int (eval s a == eval s b)
+        | Binop ("!=", a, b) -> to_int (eval s a != eval s b)
+        | Binop ("!!", a, b) -> to_int (eval s a != 0 || eval s b != 0)
+        | Binop ("&&", a, b) -> to_int (eval s a != 0 && eval s b != 0)
+        | _ -> failwith @@ Printf.sprintf "Syntax error"
 
   end
                     
@@ -65,8 +84,15 @@ module Stmt =
 
        Takes a configuration and a statement, and returns another configuration
     *)
-    let eval _ = failwith "Not implemented yet"
-                                                         
+    let rec eval (s, i, o) stmt =
+        match stmt with
+            | Read x -> (match i with
+                            | z::t -> Expr.update x z s, t, o
+                            | _ -> failwith "Read from empty input"
+                        )
+            | Write e -> s, i, o @ [Expr.eval s e]
+            | Assign (x, e) -> Expr.update x (Expr.eval s e) s, i, o
+            | Seq (st1, st2) -> eval (eval (s, i, o) st1) st2
   end
 
 (* The top-level definitions *)
