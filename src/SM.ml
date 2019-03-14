@@ -18,13 +18,33 @@ type prg = insn list
  *)
 type config = int list * Stmt.config
 
+let ( !? ) n = Language.Expr.Const n
+let binop op x y = Language.Expr.Binop (op, x, y)
+
 (* Stack machine interpreter
 
      val eval : config -> prg -> config
 
    Takes a configuration and a program, and returns a configuration as a result
 *)                         
-let rec eval conf prog = failwith "Not yet implemented"
+let rec eval (stk, (s, i, o)) prg = match prg with
+    | ins::p -> (match ins with
+                    | BINOP op -> eval (match stk with
+                                    | y::x::t -> (Language.Expr.eval s (binop op !?x !?y))::t, (s, i, o)
+                                    | _ -> failwith "Too few elements on stack") p
+                    | CONST z -> eval (z::stk, (s, i, o)) p
+                    | READ -> eval (match i with
+                                    | z::t -> z::stk, (s, t, o)
+                                    | _ -> failwith "Read from empty input") p
+                    | WRITE -> eval (match stk with
+                                    | z::t -> t, (s, i, o @ [z])
+                                    | _ -> failwith "Write from empty stack") p
+                    | LD x -> eval ((s x)::stk, (s, i, o)) p
+                    | ST x -> eval (match stk with
+                                    | z::t -> t, ((Language.Expr.update x z s), i, o)
+                                    | _ -> failwith "Store from empty stack") p
+                )
+    | [] -> (stk, (s, i, o))
 
 (* Top-level evaluation
 

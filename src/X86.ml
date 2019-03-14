@@ -73,6 +73,14 @@ let show instr =
 (* Opening stack machine to use instructions without fully qualified names *)
 open SM
 
+let setSuf = function
+    | "<=" -> "le"
+    | ">=" -> "ge"
+    | "!=" -> "ne"
+    | "==" -> "e"
+    | "<"  -> "l"
+    | ">"  -> "g"
+
 (* Symbolic stack machine evaluator
 
      compile : env -> prg -> env * instr list
@@ -80,7 +88,49 @@ open SM
    Take an environment, a stack machine program, and returns a pair --- the updated environment and the list
    of x86 instructions
 *)
-let compile _ _ = failwith "Not yet implemented"
+let rec compile env prg =
+    match prg with
+    | [] -> env, []
+    | instr :: code ->
+        let env, asm =
+            match instr with
+            | CONST n ->
+                let s, env = env#allocate in
+                env, [Mov (L n, s)]
+            | WRITE ->
+                let s, env = env#pop in
+                env, [Push s; Call "Lwrite"; Pop eax]
+            | LD x ->
+                let s, env = (env#global x)#allocate in
+                env, [Mov (M env#loc x, s)]
+            | ST x ->
+                let s, env = (env#global x)#pop in
+                env, [Mov (s, M env#loc x)]
+            | READ ->
+                let s, env = env#allocate in
+                env, [Call "Lread"; Mov(eax, s)]
+            | BINOP op ->
+                let b, a, env = env#pop2 in
+                let s, env = env#allocate in
+                match op with
+                | "+" | "-" | "*" ->
+                    env, [Mov (a, eax); Mov (b, edx); Binop (op, edx, eax); Mov(eax, s)]
+                | "/" ->
+                    env, [Mov (a, eax); Cltd; IDiv b; Mov(eax, s)]
+                | "%" ->
+                    env, [Mov (a, eax); Cltd; IDiv b; Mov(edx, s)]
+                | "<=" | ">=" | "!=" | "==" | "<" | ">" ->
+                    env, [Mov (a, edi);
+                          Mov (b, edx);
+                          Binop ("^", eax, eax);
+                          Binop ("cmp", edx, edi);
+                          Set (setSuf op, "%al");
+                          Mov (eax, s)]
+                | _ -> failwith "No impl"
+
+        in
+        let env, asm' = compile env code in
+        env, asm @ asm'
 
 (* A set of strings *)           
 module S = Set.Make (String)
