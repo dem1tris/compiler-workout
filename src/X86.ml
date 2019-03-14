@@ -102,10 +102,14 @@ let rec compile env prg =
                 env, [Push s; Call "Lwrite"; Pop eax]
             | LD x ->
                 let s, env = (env#global x)#allocate in
-                env, [Mov (M env#loc x, eax); Mov (eax, s)]
+                env, (match s with
+                     | R i -> [Mov (M env#loc x, s)]
+                     | _ -> [Mov (M env#loc x, eax); Mov (eax, s)])
             | ST x ->
                 let s, env = (env#global x)#pop in
-                env, [Mov (s, eax); Mov (eax, M env#loc x)]
+                env, (match s with
+                     | R i -> [Mov (s, M env#loc x)]
+                     | _ -> [Mov (s, eax); Mov (eax, M env#loc x)])
             | READ ->
                 let s, env = env#allocate in
                 env, [Call "Lread"; Mov (eax, s)]
