@@ -102,23 +102,23 @@ let rec compile env prg =
                 env, [Push s; Call "Lwrite"; Pop eax]
             | LD x ->
                 let s, env = (env#global x)#allocate in
-                env, [Mov (M env#loc x, s)]
+                env, [Mov (M env#loc x, eax); Mov (eax, s)]
             | ST x ->
                 let s, env = (env#global x)#pop in
-                env, [Mov (s, M env#loc x)]
+                env, [Mov (s, eax); Mov (eax, M env#loc x)]
             | READ ->
                 let s, env = env#allocate in
-                env, [Call "Lread"; Mov(eax, s)]
+                env, [Call "Lread"; Mov (eax, s)]
             | BINOP op ->
                 let b, a, env = env#pop2 in
                 let s, env = env#allocate in
                 match op with
                 | "+" | "-" | "*" ->
-                    env, [Mov (a, eax); Mov (b, edx); Binop (op, edx, eax); Mov(eax, s)]
+                    env, [Mov (a, eax); Mov (b, edx); Binop (op, edx, eax); Mov (eax, s)]
                 | "/" ->
-                    env, [Mov (a, eax); Cltd; IDiv b; Mov(eax, s)]
+                    env, [Mov (a, eax); Cltd; IDiv b; Mov (eax, s)]
                 | "%" ->
-                    env, [Mov (a, eax); Cltd; IDiv b; Mov(edx, s)]
+                    env, [Mov (a, eax); Cltd; IDiv b; Mov (edx, s)]
                 | "<=" | ">=" | "!=" | "==" | "<" | ">" ->
                     env, [Mov (a, edi);
                           Mov (b, edx);
@@ -126,7 +126,15 @@ let rec compile env prg =
                           Binop ("cmp", edx, edi);
                           Set (setSuf op, "%al");
                           Mov (eax, s)]
-                | _ -> failwith "No impl"
+                | "!!" | "&&" -> env, [Binop ("^", edx, edx);
+                                       Binop ("^", eax, eax);
+                                       Binop ("cmp", L 0, a);
+                                       Set ("ne", "%al");
+                                       Binop ("cmp", L 0, b);
+                                       Set ("ne", "%dl");
+                                       Binop (op, edx, eax);
+                                       Mov (eax, s)]
+                | _ -> failwith (Printf.sprintf "Unknown binop %s" op)
 
         in
         let env, asm' = compile env code in
