@@ -1,4 +1,4 @@
-TESTS=$(basename $(wildcard generated*.expr))
+TESTS=$(basename $(wildcard generated0*.expr))
 
 RC = ../../src/rc.opt
 
