@@ -124,10 +124,9 @@ let rec compile env prg =
                 | "%" ->
                     env, [Mov (a, eax); Cltd; IDiv b; Mov (edx, s)]
                 | "<=" | ">=" | "!=" | "==" | "<" | ">" ->
-                    env, [Mov (a, edi);
-                          Mov (b, edx);
+                    env, [Mov (b, edx);
                           Binop ("^", eax, eax);
-                          Binop ("cmp", edx, edi);
+                          Binop ("cmp", edx, a);
                           Set (setSuf op, "%al");
                           Mov (eax, s)]
                 | "!!" | "&&" -> env, [Binop ("^", edx, edx);
