@@ -7,8 +7,7 @@ RC = ../../src/rc.opt
 check: $(TESTS)
 
 $(TESTS): %: %.expr
-	cat $@.input | $(RC) -i $< > $@.log && diff $@.log orig/$@.log
-	cat $@.input | $(RC) -s $< > $@.log && diff $@.log orig/$@.log
+	$(RC) $< && cat $@.input | ./$@ > $@.log && diff $@.log orig/$@.log
 
 clean:
 	find . -maxdepth 1 -name "*.log" -delete
