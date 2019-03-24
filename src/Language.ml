@@ -78,17 +78,17 @@ module Expr =
     *)
     ostap (                                      
         expr:
-                !(Ostap.Util.expr
-                   (fun x -> x)
-                   [|
-                     `Lefta , binopSpecifier ["!!"];
-                     `Lefta , binopSpecifier ["&&"];
-                     `Nona  , binopSpecifier [">="; ">"; "=="; "!="; "<="; "<"];
-                     `Lefta , binopSpecifier ["+"; "-"];
-                     `Lefta , binopSpecifier ["*"; "/"; "%"];
-                   |]
-                   primary
-                );
+            !(Ostap.Util.expr
+               (fun x -> x)
+               [|
+                 `Lefta , binopSpecifier ["!!"];
+                 `Lefta , binopSpecifier ["&&"];
+                 `Nona  , binopSpecifier [">="; ">"; "=="; "!="; "<="; "<"];
+                 `Lefta , binopSpecifier ["+"; "-"];
+                 `Lefta , binopSpecifier ["*"; "/"; "%"];
+               |]
+               primary
+            );
         primary:
             c: DECIMAL { Const c } |
             x: IDENT { Var x } |
