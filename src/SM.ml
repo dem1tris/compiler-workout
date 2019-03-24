@@ -101,28 +101,41 @@ let labels =
    Takes a program in the source language and returns an equivalent program for the
    stack machine
 *)
-let rec compile =
+let compile prog =
   let rec expr = function
   | Expr.Var   x          -> [LD x]
   | Expr.Const n          -> [CONST n]
   | Expr.Binop (op, x, y) -> expr x @ expr y @ [BINOP op]
   in
+  let rec compile' lab =
   function
-  | Stmt.Seq (s1, s2)               -> compile s1 @ compile s2
-  | Stmt.Read x                     -> [READ; ST x]
-  | Stmt.Write e                    -> expr e @ [WRITE]
-  | Stmt.Assign (x, e)              -> expr e @ [ST x]
-  | Stmt.Skip                       -> []
+  | Stmt.Seq (s1, s2)               -> (let lab1 = labels#newLabel "sem" in
+                                        let p1, used1 = compile' lab1 s1 in
+                                        let p2, used2 = compile' lab s2 in
+                                        p1 @ (if used1 then [LABEL lab1] else []) @ p2, used2
+                                       )
+  | Stmt.Read x                     -> [READ; ST x], false
+  | Stmt.Write e                    -> expr e @ [WRITE], false
+  | Stmt.Assign (x, e)              -> expr e @ [ST x], false
+  | Stmt.Skip                       -> [], false
   | Stmt.If (cond, b1, b2)          -> (let lelse = labels#newLabel "else" in
-                                        let lfi = labels#newLabel "fi" in
-                                        expr cond @ [CJMP ("z", lelse)] @ compile b1 @ [JMP lfi] @
-                                        [LABEL lelse] @ compile b2 @ [LABEL lfi]
+                                        let p1, used1 = compile' lab b1 in
+                                        let p2, used2 = compile' lab b2 in
+                                        expr cond @ [CJMP ("z", lelse)] @ p1 @ [JMP lab] @
+                                        [LABEL lelse] @ p2, true
                                         )
   | Stmt.While (cond, b)            -> (let lcheck = labels#newLabel "wh_check" in
                                         let lloop = labels#newLabel "wh_loop" in
-                                        [JMP lcheck; LABEL lloop] @ compile b @
-                                        [LABEL lcheck] @ expr cond @ [CJMP ("nz", lloop)]
+                                        let p, used = compile' lcheck b in
+                                        [JMP lcheck; LABEL lloop] @ p @
+                                        [LABEL lcheck] @ expr cond @ [CJMP ("nz", lloop)], false
                                        )
   | Stmt.Repeat (b, cond)           -> (let lloop = labels#newLabel "rp_loop" in
-                                        [LABEL lloop] @ compile b @ expr cond @ [CJMP ("z", lloop)]
+                                        let lcheck = labels#newLabel "rp_check" in
+                                        let p, used = compile' lloop b in
+                                        [LABEL lloop] @ p @ (if used then [LABEL lcheck] else []) @ expr cond @ [CJMP ("z", lloop)], false
                                        )
+  in
+  let lab = labels#newLabel "end" in
+  let res, used = compile' lab prog in
+  res @ (if used then [LABEL lab] else [])
