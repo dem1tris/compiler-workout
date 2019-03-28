@@ -119,10 +119,11 @@ let compile prog =
   | Stmt.Assign (x, e)              -> expr e @ [ST x], false
   | Stmt.Skip                       -> [], false
   | Stmt.If (cond, b1, b2)          -> (let lelse = labels#newLabel "else" in
-                                        let p1, _ = compile' lab b1 in
-                                        let p2, _ = compile' lab b2 in
-                                        expr cond @ [CJMP ("z", lelse)] @ p1 @ [JMP lab] @
-                                        [LABEL lelse] @ p2, true
+                                        let p1, used1 = compile' lab b1 in
+                                        let p2, used2 = compile' lab b2 in
+                                        expr cond @ [CJMP ("z", lelse)]
+                                        @ p1 @ (if used1 then [] else [JMP lab]) @ [LABEL lelse]
+                                        @ p2 @ (if used1 then [] else [JMP lab]), true
                                         )
   | Stmt.While (cond, b)            -> (let lcheck = labels#newLabel "wh_check" in
                                         let lloop = labels#newLabel "wh_loop" in
