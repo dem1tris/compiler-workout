@@ -119,6 +119,10 @@ module Expr =
     )
     
   end
+
+let unwrap o = match o with
+    | None -> []
+    | Some l -> l
                     
 (* Simple statements: syntax and sematics *)
 module Stmt =
@@ -150,11 +154,83 @@ module Stmt =
 
        which returns a list of formal parameters and a body for given definition
     *)
-    let rec eval _ = failwith "Not Implemented Yet"
+    let rec eval env (s, i, o) stmt =
+                match stmt with
+                    | Read x -> (match i with
+                                    | z::t -> State.update x z s, t, o
+                                    | _ -> failwith "Read from empty input"
+                                )
+                    | Write e -> s, i, o @ [Expr.eval s e]
+                    | Assign (x, e) -> State.update x (Expr.eval s e) s, i, o
+                    | Seq (st1, st2) -> eval env (eval env (s, i, o) st1) st2
+                    | Skip -> s, i, o
+                    | If (cond, st1, st2)-> (
+                        let res = Expr.eval s cond in
+                        if res = 0
+                        then eval env (s, i, o) st2
+                        else  eval env (s, i, o) st1
+                    )
+                    | While (cond, st) -> (
+                        let res = Expr.eval s cond in
+                        if res = 0
+                        then s, i, o
+                        else eval env (eval env (s, i, o) st) (While (cond, st))
+                    )
+                    | Repeat (st, cond) -> (
+                        let (s', i', o') = eval env (s, i, o) st in
+                        let res = Expr.eval s' cond in
+                        if res != 0
+                        then s', i', o'
+                        else eval env (s', i', o') (Repeat (st, cond))
+                    )
+                    | Call (func, param_exprs) -> (
+                        let (args, locals, body) = env#definition func in
+                        let params = List.map (Expr.eval s) param_exprs in
+                        let upd s x v = State.update x v s in
+                        let s' = State.push_scope s (args @ locals) in
+                        let s' = List.fold_left2 upd s' args params in
+                        let (s'', i, o) = eval env (s', i, o) body in
+                        (State.drop_scope s'' s, i, o)
+                    )
                                 
     (* Statement parser *)
     ostap (                                      
-      parse: empty {failwith "Not yet implemented"}
+      stmt:
+          f:IDENT "(" params:lst? ")"                    {Call (f, unwrap params)} |
+          "read"  "(" x:IDENT ")"                        {Read x}           |
+          "write" "(" e:!(Expr.parse) ")"                {Write e}          |
+          x:IDENT  ":=" e:!(Expr.parse)                  {Assign (x, e)}    |
+          b: (iff | forr | whil | repeat)                {b}                |
+          "skip"                                         {Skip};
+      lst:
+          a:!(Expr.parse) "," tail:lst                   {a::tail} |
+          a:!(Expr.parse)                                {[a]};
+      repeat:
+          "repeat" b:parse
+          "until" cond:!(Expr.parse)                     {Repeat (b, cond)};
+      forr:
+          "for" a:stmt
+          "," cond:!(Expr.parse)
+          "," st:stmt
+          "do" b:parse
+          "od"                                           {Seq (a, While (cond, Seq(b, st)))};
+      iff:
+          "if" e:!(Expr.parse)
+              "then" thb:parse
+              elb:elif?
+              "fi"                                       {If (e, thb, match elb with Some b -> b | None -> Skip)};
+      elif:
+          "else" eb:parse                                {eb}              |
+          "elif" e:!(Expr.parse)
+              "then" thb:parse
+              elb:elif                                   {If (e, thb, elb)};
+      whil:
+          "while" cond:!(Expr.parse)
+          "do" b:parse
+          "od"                                           {While (cond, b)};
+      parse:
+          st:stmt ";" tail:parse                         {Seq (st, tail)}   |
+          stmt
     )
       
   end
@@ -167,7 +243,12 @@ module Definition =
     type t = string * (string list * string list * Stmt.t)
 
     ostap (                                      
-      parse: empty {failwith "Not yet implemented"}
+      parse:
+        "fun" name:IDENT "(" args:lst? ")" locals:(-"local" lst)? "{" body:!(Stmt.parse)? "}"
+                {name, (unwrap args, unwrap locals, match body with Some s -> s | _ -> Stmt.Skip)};
+      lst:
+        a:IDENT "," tail:lst {a::tail} |
+        a:IDENT               {[a]}
     )
 
   end
