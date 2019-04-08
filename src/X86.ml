@@ -90,17 +90,106 @@ open SM
    Take an environment, a stack machine program, and returns a pair --- the updated environment and the list
    of x86 instructions
 *)
-let compile env code = failwith "Not implemented"
-                                
-(* A set of strings *)           
+(*let compile env code = failwith "Not implemented"*)
+let rec initImpl cnt = if cnt < 0 then [] else cnt :: initImpl (cnt - 1)
+let list_init cnt = List.rev (initImpl (cnt - 1))
+
+let setSuf = function
+    | "<=" -> "le"
+    | ">=" -> "ge"
+    | "!=" -> "ne"
+    | "==" -> "e"
+    | "<"  -> "l"
+    | ">"  -> "g"
+
+let rec compile env = function
+    | [] -> env, []
+    | instr :: code ->
+        let env, asm =
+            match instr with
+            | CONST n   ->
+                let s, env = env#allocate in
+                env, [Mov (L n, s)]
+            | WRITE     ->
+                let s, env = env#pop in
+                env, [Push s; Call "Lwrite"; Pop eax]
+            | READ      ->
+                let s, env = env#allocate in
+                env, [Call "Lread"; Mov (eax, s)]
+            | LD x ->
+                let s, env = (env#global x)#allocate in
+                let v = env#loc x in
+                env, (match s with
+                     | R i -> [Mov (v, s)]
+                     | _ -> [Mov (v, eax); Mov (eax, s)])
+            | ST x ->
+                let s, env = (env#global x)#pop in
+                let v = env#loc x in
+                env, (match s with
+                     | R i -> [Mov (s, v)]
+                     | _ -> [Mov (s, eax); Mov (eax, v)])
+            | BINOP op -> (
+                let b, a, env = env#pop2 in
+                let s, env = env#allocate in
+                match op with
+                | "+" | "-" | "*" ->
+                    env, [Mov (a, eax); Mov (b, edx); Binop (op, edx, eax); Mov (eax, s)]
+                | "/" ->
+                    env, [Mov (a, eax); Cltd; IDiv b; Mov (eax, s)]
+                | "%" ->
+                    env, [Mov (a, eax); Cltd; IDiv b; Mov (edx, s)]
+                | "<=" | ">=" | "!=" | "==" | "<" | ">" ->
+                    env, [Mov (b, edx);
+                          Binop ("^", eax, eax);
+                          Binop ("cmp", edx, a);
+                          Set (setSuf op, "%al");
+                          Mov (eax, s)]
+                | "!!" | "&&" -> env, [Binop ("^", edx, edx);
+                                       Binop ("^", eax, eax);
+                                       Binop ("cmp", L 0, a);
+                                       Set ("ne", "%al");
+                                       Binop ("cmp", L 0, b);
+                                       Set ("ne", "%dl");
+                                       Binop (op, edx, eax);
+                                       Mov (eax, s)]
+                | _ -> failwith (Printf.sprintf "Unknown binop %s" op))
+            | LABEL l   -> env, [Label l]
+            | JMP l     -> env, [Jmp l]
+            | CJMP (suf, l) -> let s, env = env#pop in env, [Binop ("cmp", L 0, s); CJmp (suf, l)]
+            | CALL (name, nargs, flag) ->
+                let (env, args) = List.fold_left
+                    (fun (env, args) _ -> let arg, env = env#pop in (env, arg::args))
+                    (env, []) (list_init nargs) in
+                let (env, take_result) = if flag
+                                    then let (a, env) = env#allocate in env, [Mov (eax, a)]
+                                    else env, [] in
+                env, (List.map (fun x -> Push x) args) @ [Call name; Binop ("+", L (nargs * word_size), esp)] @ take_result
+            | BEGIN (name, params, locals) ->
+                let save_regs = List.map (fun x -> Push (R x)) (list_init num_of_regs) in
+                let env = env#enter name params locals in
+                env, [Push ebp; Mov (esp, ebp)] @ save_regs @ [Binop ("-", M ("$" ^ env#lsize), esp)]
+            | END ->
+                let restore_regs = List.map (fun x -> Pop (R x)) (List.rev (list_init num_of_regs)) in
+                env, [Label env#epilogue] @ restore_regs @ [Mov (ebp, esp); Pop ebp; Ret;
+                      Meta (Printf.sprintf "\t.set %s, %d" env#lsize (env#allocated * word_size))]
+            | RET flag ->
+                if flag
+                then let a, env = env#pop in env, [Mov (a, eax); Jmp env#epilogue]
+                else env, [Jmp env#epilogue]
+        in
+        let env, asm' = compile env code in
+        env, asm @ asm'
+
+(* A set of strings *)
 module S = Set.Make (String)
 
 (* Environment implementation *)
-let make_assoc l = List.combine l (List.init (List.length l) (fun x -> x))
-                     
+(*let make_assoc l = List.combine l (List.init (List.length l) (fun x -> x))*)
+let make_assoc l = List.combine l (list_init (List.length l))
+
 class env =
-  object (self)
-    val globals     = S.empty (* a set of global variables         *)
+    object (self)
+    val globals = S.empty (* a set of global variables             *)
     val stack_slots = 0       (* maximal number of stack positions *)
     val stack       = []      (* symbolic stack                    *)
     val args        = []      (* function arguments                *)
@@ -116,14 +205,14 @@ class env =
     (* allocates a fresh position on a symbolic stack *)
     method allocate =    
       let x, n =
-	let rec allocate' = function
-	| []                            -> ebx     , 0
-	| (S n)::_                      -> S (n+1) , n+1
-	| (R n)::_ when n < num_of_regs -> R (n+1) , stack_slots
+        let rec allocate' = function
+        | []                            -> ebx     , 0
+        | (S n)::_                      -> S (n+1) , n+1
+        | (R n)::_ when n < num_of_regs -> R (n+1) , stack_slots
         | (M _)::s                      -> allocate' s
-	| _                             -> S 0     , 1
-	in
-	allocate' stack
+        | _                             -> S 0     , 1
+        in
+        allocate' stack
       in
       x, {< stack_slots = max n stack_slots; stack = x::stack >}
 
