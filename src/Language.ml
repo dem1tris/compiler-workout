@@ -219,6 +219,7 @@ module Expr =
         | Length x                -> let (st, i, o, v) = eval_list env conf [x] in env#definition env ".length" v (st, i, o, None)
         | Elem (a, index)         -> let (st, i, o, v) = eval_list env conf [a; index] in env#definition env ".elem" v (st, i, o, None)
         | String str              -> (st, i, o, Some (Value.of_string str))
+        | Sexp (t, elems)         -> let (st, i, o, v) = eval_list env conf elems in (st, i, o, Some (Value.Sexp (t, v)))
 
     and eval_list env conf xs =
       let vs, (st, i, o, _) =
@@ -266,11 +267,13 @@ module Expr =
                         | _ -> with_len
                 };
         base:
-            n:DECIMAL                               {Const n} |
-            s:STRING                                {String (String.sub s 1 (String.length s - 2))} |
-            c:CHAR                                  {Const (Char.code c)} |
-            "[" elems:!(Util.list0 parse) "]"       {Array elems} |
-            x:IDENT call:( -"(" params:lst? -")" )? {match call with Some args -> Call (x, unwrap args) | None -> Var x} |
+            n:DECIMAL                                        {Const n} |
+            s:STRING                                         {String (String.sub s 1 (String.length s - 2))} |
+            c:CHAR                                           {Const (Char.code c)} |
+            "[" elems:!(Util.list0 parse) "]"                {Array elems} |
+            x:IDENT call:( -"(" params:lst? -")" )?          {match call with Some args -> Call (x, unwrap args) | None -> Var x} |
+            "`" t:IDENT args:(-"(" !(Util.list parse) -")")? {let args = match args with Some x -> x | None -> [] in
+                                                              Sexp (t, args)} |
             -"(" parse -")";
         lst:
             a:parse "," tail:lst {a::tail} |
