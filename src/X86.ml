@@ -83,6 +83,11 @@ let show instr =
 (* Opening stack machine to use instructions without fully qualified names *)
 open SM
 
+let rec list_init iter n f =
+  if iter < n
+  then (f iter) :: (list_init (iter + 1) n f)
+  else []
+
 (* Symbolic stack machine evaluator
 
      compile : env -> prg -> env * instr list
@@ -264,7 +269,7 @@ module S = Set.Make (String)
 module M = Map.Make (String)
 
 (* Environment implementation *)
-let make_assoc l = List.combine l (List.init (List.length l) (fun x -> x))
+let make_assoc l = List.combine l (list_init 0 (List.length l) (fun x -> x))
                      
 class env =
   object (self)
