@@ -20,8 +20,10 @@ module Value =
     @type t = Int of int | String of bytes | Array of t array | Sexp of string * t list (*with show*)
 
     let to_int = function 
-    | Int n -> n 
-    | _ -> failwith "int value expected"
+    | Int n -> n
+    | String _ -> failwith "int value expected, got string"
+    | Array _ -> failwith "int value expected, got array"
+    | Sexp _ -> failwith "int value expected, got sexp"
 
     let to_string = function 
     | String s -> s 
@@ -39,6 +41,12 @@ module Value =
     let tag_of = function
     | Sexp (t, _) -> t
     | _ -> failwith "symbolic expression expected"
+
+    let rec v2s = function
+          | Int i -> Printf.sprintf "%d" i
+          | String bs -> Bytes.to_string bs
+          | Array vals -> Printf.sprintf "[%s]" (String.concat ", " (Array.to_list (Array.map v2s vals)))
+          | Sexp (name, vals) -> Printf.sprintf "%s{%s}" name (String.concat ", " (List.map v2s vals))
 
     let update_string s i x = Bytes.set s i x; s 
     let update_array  a i x = a.(i) <- x; a
@@ -121,16 +129,23 @@ module Builtin =
                                      | Value.Array    a  -> a.(i)
                                      | Value.Sexp (_, a) -> List.nth a i
                                )
-                    )         
-    | ".length"     -> (st, i, o, Some (Value.of_int (match List.hd args with Value.Sexp (_, a) -> List.length a | Value.Array a -> Array.length a | Value.String s -> Bytes.length s)))
+                    )
+    | ".length"     -> (st, i, o, Some (Value.of_int
+                            (match List.hd args with
+                            | Value.Sexp (_, a) -> List.length a
+                            | Value.Array a -> Array.length a
+                            | Value.String s -> Bytes.length s))
+                        )
     | ".array"      -> (st, i, o, Some (Value.of_array @@ Array.of_list args))
     | ".string"     -> let toString v = Some (Value.String (Bytes.of_string v)) in
                        let rec convert v = match v with
                          | (Value.String bytes) -> Printf.sprintf "\"%s\"" (Bytes.to_string bytes)
                          | (Value.Int num) -> Printf.sprintf "%d" num
-                         | (Value.Array elems) -> let elemsStr = String.concat ", " (List.map convert (Array.to_list elems)) in Printf.sprintf "[%s]" elemsStr
+                         | (Value.Array elems) -> let s = String.concat ", " (List.map convert (Array.to_list elems)) in
+                            Printf.sprintf "[%s]" s
                          | (Value.Sexp (t, args)) ->
-                            if (List.length args != 0) then let argsStr = String.concat ", " (List.map convert args) in Printf.sprintf "`%s (%s)" t argsStr
+                            if (List.length args != 0)
+                            then let s = String.concat ", " (List.map convert args) in Printf.sprintf "`%s (%s)" t s
                             else Printf.sprintf "`%s" t
                        in (st, i, o, toString (convert (List.hd args)))
     | "isArray"  -> let [a] = args in (st, i, o, Some (Value.of_int @@ match a with Value.Array  _ -> 1 | _ -> 0))
@@ -299,7 +314,11 @@ module Stmt =
 
         (* Pattern parser *)                                 
         ostap (
-          parse: empty {failwith "Not implemented"}
+          parse:
+            x:IDENT                                                     {Ident x}   |
+            "_"                                                         {Wildcard}  |
+            "`" t:IDENT args:(-"(" !(Util.list parse) -")")?
+                {let args = match args with Some x -> x | None -> [] in Sexp (t, args)}
         )
         
         let vars p =
@@ -363,13 +382,36 @@ module Stmt =
                                                     | Some x -> Expr.eval env conf x
                                                     | None   -> conf
                                                   )
+                  | Case (e, bs)               -> let ((st, i, o, Some r) as conf') = Expr.eval env conf e in
+                                                  let rec branch ((st, i, o, Some r) as conf) = function
+                                                  | [] -> failwith (Printf.sprintf "Pattern matching failed")
+                                                  | (pat, body)::tail ->
+                                                    let rec match_pat pat v st =
+                                                        let update x v = function
+                                                        | Some s -> Some (State.bind x v s)
+                                                        | None   -> None in
+                                                    match pat, v with
+                                                    | Pattern.Ident x, v    -> update x v st
+                                                    | Pattern.Wildcard, v   -> st
+                                                    | Pattern.Sexp (t, ps), Value.Sexp (t', vs) -> if t = t' then match_list ps vs st else None
+                                                    and match_list ps vs st = match ps, vs with
+                                                    | p::ps', v::vs' -> match_list ps' vs' (match_pat p v st)
+                                                    | [], []         -> st
+                                                    | _              -> None in
+                                                    match match_pat pat r (Some State.undefined) with
+                                                    | None -> branch conf tail
+                                                    | Some st' ->
+                                                      eval env (State.push st st' (Pattern.vars pat), i, o, None) k (Seq(body, Leave))
+                                                    in
+                                                    branch conf' bs
+                  | Leave                      -> eval env (State.drop st, i, o, r) Skip k
                                                         
     (* Statement parser *)
     ostap (
       stmt:
           f:IDENT "(" params:lst? ")"                                                   {Call (f, unwrap params)}  |
           x:IDENT ids:(-"[" !(Expr.parse) -"]")*  ":=" e:!(Expr.parse)                  {Assign (x, ids, e)}            |
-          b: (iff | forr | whil | repeat)                                               {b}                        |
+          b: (iff | forr | whil | repeat | case)                                        {b}                        |
           r: "return" e:!(Expr.parse)?                                                  {Return e}                 |
           "skip"                                                                        {Skip};
       lst:
@@ -398,6 +440,11 @@ module Stmt =
           "while" cond:!(Expr.parse)
           "do" b:parse
           "od"                                           {While (cond, b)};
+      case:
+          "case" e:!(Expr.parse) "of"
+          fb:(-("|")? p:!(Pattern.parse) -"->" b:parse)
+          bs:(-"|"    p:!(Pattern.parse) -"->" b:parse)*
+          "esac"                                         {Case (e, fb::bs)};
       parse:
           st:stmt ";" tail:parse                         {Seq (st, tail)}   |
           stmt

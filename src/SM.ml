@@ -18,6 +18,8 @@ open Language
 (* calls a function/procedure      *) | CALL    of string * int * bool
 (* returns from a function         *) | RET     of bool
 (* drops the top element off       *) | DROP
+                                      | DROPN   of int
+(* conditional multiple drop&jmp   *) | CDRNJ   of string * int * string
 (* duplicates the top element      *) | DUP
 (* swaps two top elements          *) | SWAP
 (* checks the tag of S-expression  *) | TAG     of string
@@ -60,22 +62,25 @@ let split n l =
 let rec eval env cfg prg =
     let cs, stk, (s, i, o) = cfg in
     match prg with
-    | ins::p -> (match ins with
+    | ins::p -> (
+    (*Printf.eprintf "\nExecuting %s with stack \n\t[%s]\n" (show insn ins) (String.concat " ,\n\t" (List.map Value.v2s stk));*)
+                 (*Printf.printf "---%s\n" (show(insn) ins);*)
+                 match ins with
                     | BINOP op -> (let cfg' = match stk with
                                      | y::x::t -> cs, (Value.of_int (Expr.to_func op (Value.to_int x) (Value.to_int y)))::t, (s, i, o)
                                      | _ -> failwith "Too few elements on stack" in
                                    eval env cfg' p
                                   )
-                    | CONST z -> (let cfg' = (cs, (Language.Value.of_int z)::stk, (s, i, o)) in
+                    | CONST z -> (let cfg' = (cs, (Value.of_int z)::stk, (s, i, o)) in
                                   eval env cfg' p
                                  )
                     | STRING str -> eval env (cs, (Value.of_string str)::stk, (s, i, o)) p
                     | LD x -> eval env (cs, (State.eval s x)::stk, (s, i, o)) p
                     | ST x -> eval env (match stk with
-                                    | z::t -> cs, t, ((Language.State.update x z s), i, o)
+                                    | z::t -> cs, t, ((State.update x z s), i, o)
                                     | _ -> failwith "Store from empty stack") p
                     | STA (x, n) -> let v::ids, stk' = split (n + 1) stk in
-                                    let s' = Language.Stmt.update s x v ids in
+                                    let s' = Stmt.update s x v ids in
                                     eval env (cs, stk', (s', i, o)) p
                     | LABEL l -> eval env (cs, stk, (s, i, o)) p
                     | JMP l -> eval env (cs, stk, (s, i, o)) (env#labeled l)
@@ -83,6 +88,11 @@ let rec eval env cfg prg =
                                         eval env (cs, stk, (s, i, o)) (if sufToOp suf @@ Value.to_int h
                                                                        then env#labeled l
                                                                        else p)
+                    | CDRNJ (suf, dep, l) -> let h::stk = stk in
+                                        if sufToOp suf @@ Value.to_int h
+                                        then let _, stk = split dep stk in eval env (cs, stk, (s, i, o)) (env#labeled l)
+                                        else eval env (cs, stk, (s, i, o)) p
+                    | DROPN n -> let _, stk = split n stk in eval env (cs, stk, (s, i, o)) p
                     | BEGIN (_, args, locals) -> (
                         let s' = State.enter s (args @ locals) in
                         let take_params = List.map (fun x -> ST x) args in
@@ -95,6 +105,20 @@ let rec eval env cfg prg =
                     | CALL (label, n, is_func) -> if env#is_label label
                                             then eval env ((p, s)::cs, stk, (s, i, o)) (JMP(label)::p)
                                             else eval env (env#builtin cfg label n (not is_func)) p
+                    | SEXP (t, n) -> let vs, stk' = split n stk in
+                                     eval env (cs, (Value.sexp t @@ List.rev vs)::stk', (s, i, o)) p
+                    | DROP          -> (*)Printf.printf "%d\n" List.length stk;*) eval env (cs, List.tl stk, (s, i, o)) p
+                    | DUP           -> eval env (cs, List.hd stk :: stk, (s, i, o)) p
+                    | SWAP          -> let x::y::stk' = stk in
+                                       eval env (cs, y::x::stk', (s, i, o)) p
+                    | TAG t         -> let x::stk' = stk in
+                                       eval env (cs, (Value.of_int
+                                       @@ match x with Value.Sexp (t', _) when t' = t -> 1 | _ -> 0) :: stk', (s, i, o)) p
+                    | ENTER xs      -> let vs, stk' = split (List.length xs) stk in
+                                       eval env (cs, stk',
+                                       (State.push s (List.fold_left (fun s (x, v) -> State.bind x v s)
+                                       State.undefined (List.combine xs vs)) xs, i, o)) p
+                    | LEAVE         -> eval env (cs, stk, (State.drop s, i, o)) p
                  )
     | [] -> (cs, stk, (s, i, o))
 
@@ -121,7 +145,7 @@ let run p i =
          method builtin (cstack, stack, (st, i, o)) f n p =
            let f = match f.[0] with 'L' -> String.sub f 1 (String.length f - 1) | _ -> f in
            let args, stack' = split n stack in
-           let (st, i, o, r) = Language.Builtin.eval (st, i, o, None) (List.rev args) f in
+           let (st, i, o, r) = Builtin.eval (st, i, o, None) (List.rev args) f in
            let stack'' = if p then stack' else let Some r = r in r::stack' in
            (*Printf.printf "Builtin:\n";*)
            (cstack, stack'', (st, i, o))
@@ -147,20 +171,45 @@ let labels =
       end
 
 let compileBody prog =
+  let rec pattern lfalse depth = function
+  | Stmt.Pattern.Wildcard       -> false, [DROP]
+  | Stmt.Pattern.Ident _        -> false, [DROP]
+  | Stmt.Pattern.Sexp (t, ps) -> true, [TAG t] @ [CDRNJ ("z", depth, lfalse)] @ (
+                                     List.flatten @@
+                                       List.mapi
+                                       (fun i p -> [DUP; CONST i; CALL (".elem", 2, true)] @
+                                           [DUP] @ snd (pattern lfalse (depth + 1) p) @ [DROP]
+                                       ) ps
+                                     ) in
+
+  let bindings p =
+    let rec makeIndexedPaths p' = match p' with
+      | Stmt.Pattern.Wildcard -> []  (* do nothing *)
+      | Stmt.Pattern.Ident _ -> [[]] (* later: DUP; go [].length == 0 levels deeper & SWAP *)
+      | Stmt.Pattern.Sexp (_, subexprs) ->
+         (* concat index on current level with deeper subpaths *)
+         let numerate i subexp = List.map (fun subpath -> i::subpath) (makeIndexedPaths subexp) in
+         List.flatten (List.mapi numerate subexprs) in
+    let takeNth n = [CONST n; CALL (".elem", 2, true)] in
+    (* DUP; go deeper by indices; SWAP*)
+    let takeByPath indexedPath = [DUP] @ (List.flatten (List.map takeNth indexedPath)) @ [SWAP] in
+    [LABEL "bindings_dbg"] @ List.flatten (List.map takeByPath (List.rev (makeIndexedPaths p))) @ [LABEL "\\\bindings_dbg"] in
+
   let rec expr = function
-  | Expr.Var   x          -> [LD x]
-  | Expr.Const n          -> [CONST n]
-  | Language.Expr.String str -> [STRING str]
-  | Expr.Binop (op, x, y) -> expr x @ expr y @ [BINOP op]
-  | Expr.Call (name, params) -> List.flatten (List.map (expr) (List.rev params)) @ [CALL (name, List.length params, true)]
-  | Expr.Array elems      -> let compiled_elems = List.concat (List.map (expr) (List.rev elems)) in
-                             compiled_elems @ [CALL ("$array", (List.length compiled_elems), true)]
-  | Language.Expr.Elem (e, i) -> expr i @ expr e @ [CALL ("$elem", 2, true)]
-  | Language.Expr.Length e -> expr e @ [CALL ("$length", 1, true)]
+  | Expr.Var   x                -> [LD x]
+  | Expr.Const n                -> [CONST n]
+  | Language.Expr.String str    -> [STRING str]
+  | Expr.Binop (op, x, y)       -> expr x @ expr y @ [BINOP op]
+  | Expr.Call (name, params)    -> List.flatten (List.map (expr) (List.rev params)) @ [CALL (name, List.length params, true)]
+  | Expr.Array elems      -> let compiled_elems = List.concat (List.map (expr) (elems)) in
+                             compiled_elems @ [CALL (".array", (List.length compiled_elems), true)]
+  | Expr.Sexp (t, xs)     -> List.flatten (List.map expr xs) @ [SEXP (t, List.length xs)]
+  | Expr.Elem (e, i)      -> expr e @ expr i @ [CALL (".elem", 2, true)]
+  | Expr.Length e         -> expr e @ [CALL (".length", 1, true)]
   in
   let rec compile' lab =
   function
-  | Stmt.Seq (s1, s2)               -> (let lab1 = labels#newLabel "sem" in
+  | Stmt.Seq (s1, s2)               -> (let lab1 = labels#newLabel "seq" in
                                         let p1, used1 = compile' lab1 s1 in
                                         let p2, used2 = compile' lab s2 in
                                         p1 @ (if used1 then [LABEL lab1] else []) @ p2, used2
@@ -191,6 +240,20 @@ let compileBody prog =
                                        )
   | Stmt.Call (name, params)        -> List.flatten (List.map (expr) (List.rev params)) @ [CALL (name, List.length params, false)], false
   | Stmt.Return e                   -> (match e with Some x -> (expr x) @ [RET true] | None -> [RET false]), false
+  | Stmt.Leave                      -> [LEAVE], false
+  | Stmt.Case (e, bs)               -> let n = List.length bs - 1 in
+                                       let _, _, code
+                                       = List.fold_left
+                                          (fun (l, i, code) (p, s) ->
+                                            let lFalse, jmp = if i = n then lab, []
+                                                              else labels#newLabel "caseb", [JMP lab] in
+                                            let _, pCode = pattern lFalse 0 p in
+                                            let sBody, _ = compile' lab (Stmt.Seq (s, Stmt.Leave)) in
+                                            let amLabel = match l with Some x -> [LABEL x; DUP] | None -> [] in
+                                            (*(Some lFalse, i + 1, (amLabel @ pCode @ bindings p @ [DROP; LABEL labels#newLabel "_dbg_1"; ENTER (List.rev (Stmt.Pattern.vars p))] @ sBody @ jmp) :: code)*)
+                                            (Some lFalse, i + 1, (amLabel @ pCode @ bindings p @ [DROP; ENTER (List.rev (Stmt.Pattern.vars p))] @ sBody @ jmp) :: code)
+                                          ) (None, 0, []) bs in
+                                       expr e @ [DUP] @ (List.flatten @@ List.rev code), true
   in
   let lab = labels#newLabel "end" in
   let res, used = compile' lab prog in
