@@ -48,7 +48,7 @@ module Value =
           (*| Array vals -> Printf.sprintf "[%s]" (String.concat ", " (Array.to_list (Array.map v2s vals)))*)
           (*| Sexp (name, vals) -> Printf.sprintf "%s{%s}" name (String.concat ", " (List.map v2s vals))*)
 
-    let update_string s i x = Bytes.set s i x; s 
+    let update_string s i x = Bytes.set s i x; Bytes.to_string s
     let update_array  a i x = a.(i) <- x; a
                       
   end
@@ -351,7 +351,7 @@ module Stmt =
       | i::tl ->
           let i = Value.to_int i in
           (match a with
-           | Value.String s when tl = [] -> Value.String (Value.update_string s i (Char.chr @@ Value.to_int v))
+           | Value.String s when tl = [] -> Value.String (Value.update_string (Bytes.of_string s) i (Char.chr @@ Value.to_int v))
            | Value.Array a               -> Value.Array  (Value.update_array  a i (update a.(i) v tl))
            ) 
       in
