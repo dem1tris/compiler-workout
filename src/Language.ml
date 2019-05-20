@@ -125,7 +125,7 @@ module Builtin =
     | ".elem"    -> let [b; j] = args in
                     (st, i, o, let i = Value.to_int j in
                                Some (match b with
-                                     | Value.String   s  -> Value.of_int @@ Char.code (Bytes.get s i)
+                                     | Value.String   s  -> Value.of_int @@ Char.code (Bytes.get (Bytes.of_string s) i)
                                      | Value.Array    a  -> a.(i)
                                      | Value.Sexp (_, a) -> List.nth a i
                                )
@@ -134,7 +134,7 @@ module Builtin =
                             (match List.hd args with
                             | Value.Sexp (_, a) -> List.length a
                             | Value.Array a -> Array.length a
-                            | Value.String s -> Bytes.length s))
+                            | Value.String s -> String.length s))
                         )
     | ".array"      -> (st, i, o, Some (Value.of_array @@ Array.of_list args))
     | ".string"     -> let toString v = Some (Value.String (Bytes.of_string v)) in
