@@ -42,11 +42,11 @@ module Value =
     | Sexp (t, _) -> t
     | _ -> failwith "symbolic expression expected"
 
-    let rec v2s = function
-          | Int i -> Printf.sprintf "%d" i
-          | String bs -> Bytes.to_string bs
-          | Array vals -> Printf.sprintf "[%s]" (String.concat ", " (Array.to_list (Array.map v2s vals)))
-          | Sexp (name, vals) -> Printf.sprintf "%s{%s}" name (String.concat ", " (List.map v2s vals))
+    (*let rec v2s = function*)
+          (*| Int i -> Printf.sprintf "%d" i*)
+          (*| String bs -> Bytes.to_string bs*)
+          (*| Array vals -> Printf.sprintf "[%s]" (String.concat ", " (Array.to_list (Array.map v2s vals)))*)
+          (*| Sexp (name, vals) -> Printf.sprintf "%s{%s}" name (String.concat ", " (List.map v2s vals))*)
 
     let update_string s i x = Bytes.set s i x; s 
     let update_array  a i x = a.(i) <- x; a
