@@ -139,7 +139,7 @@ module Builtin =
     | ".array"      -> (st, i, o, Some (Value.of_array @@ Array.of_list args))
     | ".string"     -> let toString v = Some (Value.String (Bytes.of_string v)) in
                        let rec convert v = match v with
-                         | (Value.String bytes) -> Printf.sprintf "\"%s\"" (Bytes.to_string bytes)
+                         | (Value.String bytes) -> Printf.sprintf "\"%s\"" (bytes)
                          | (Value.Int num) -> Printf.sprintf "%d" num
                          | (Value.Array elems) -> let s = String.concat ", " (List.map convert (Array.to_list elems)) in
                             Printf.sprintf "[%s]" s
