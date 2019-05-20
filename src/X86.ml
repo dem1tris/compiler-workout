@@ -162,17 +162,17 @@ let compile env code =
               | CALL (name, nargs, isfunc) ->
                   let (env, args) = List.fold_left
                       (fun (env, args) _ -> let arg, env = env#pop in (env, arg::args))
-                      (env, []) (Language.list_init 0 nargs (fun x -> x)) in
+                      (env, []) (list_init 0 nargs (fun x -> x)) in
                   let (env, take_result) = if isfunc
                                       then let (a, env) = env#allocate in env, [Mov (eax, a)]
                                       else env, [] in
                   env, (List.map (fun x -> Push x) args) @ [Call (mangle name); Binop ("+", L (nargs * word_size), esp)] @ take_result
               | BEGIN (name, params, locals) ->
-                  let save_regs = List.map (fun x -> Push (R x)) (Language.list_init 0 num_of_regs (fun x -> x)) in
+                  let save_regs = List.map (fun x -> Push (R x)) (list_init 0 num_of_regs (fun x -> x)) in
                   let env = env#enter name params locals in
                   env, [Push ebp; Mov (esp, ebp)] @ save_regs @ [Binop ("-", M ("$" ^ env#lsize), esp)]
               | END ->
-                  let restore_regs = List.map (fun x -> Pop (R x)) (List.rev (Language.list_init 0 num_of_regs (fun x -> x))) in
+                  let restore_regs = List.map (fun x -> Pop (R x)) (List.rev (list_init 0 num_of_regs (fun x -> x))) in
                   env, [Label env#epilogue] @ restore_regs @ [Mov (ebp, esp); Pop ebp; Ret;
                         Meta (Printf.sprintf "\t.set %s, %d" env#lsize (env#allocated * word_size))]
               | RET isfunc ->
@@ -192,7 +192,7 @@ module S = Set.Make (String)
 module M = Map.Make (String)
 
 (* Environment implementation *)
-let make_assoc l = List.combine l (Language.list_init 0 (List.length l) (fun x -> x))
+let make_assoc l = List.combine l (list_init 0 (List.length l) (fun x -> x))
 
 class env =
   object (self)
