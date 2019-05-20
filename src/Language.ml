@@ -17,7 +17,7 @@ let unwrap o = match o with
 module Value =
   struct
 
-    @type t = Int of int | String of bytes | Array of t array | Sexp of string * t list with show
+    @type t = Int of int | String of string | Array of t array | Sexp of string * t list with show
 
     let to_int = function 
     | Int n -> n
